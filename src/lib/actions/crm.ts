@@ -1,24 +1,17 @@
 'use server';
 
 import { prisma } from '@/lib/db';
-import { SegmentRuleGroup, SegmentEngine } from '@/lib/crm/segment-engine';
-import { CampaignEngine } from '@/lib/crm/campaign-engine';
+import { sendEmail } from '@/lib/email';
 import { revalidatePath } from 'next/cache';
 import { auth } from '@/lib/auth';
 
-export async function getSegmentCount(rules: SegmentRuleGroup) {
-    const session = await auth();
-    if (!session?.user) return { count: 0 };
-
-    const user = await prisma.user.findUnique({
-        where: { id: (session.user as any).id },
-        select: { brokerId: true }
-    });
-
-    if (!user?.brokerId) return { count: 0 };
-
-    const count = await SegmentEngine.previewCount(rules, user.brokerId);
-    return { count };
+interface Recipient {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    company?: string;
+    tags?: string;
 }
 
 export async function launchCampaign(data: {
@@ -26,7 +19,7 @@ export async function launchCampaign(data: {
     name: string;
     subject: string;
     body: string;
-    segmentRules: SegmentRuleGroup;
+    recipients: Recipient[];
     scheduledFor?: string;
 }) {
     const session = await auth();
@@ -40,16 +33,7 @@ export async function launchCampaign(data: {
     if (!user?.brokerId) return { success: false, error: 'No broker profile' };
 
     try {
-        // 1. Create or find segment
-        const segment = await prisma.segment.create({
-            data: {
-                brokerId: user.brokerId,
-                name: `${data.name} - Auto Segment`,
-                rules: data.segmentRules as any,
-            }
-        });
-
-        // 2. Create or update campaign
+        // 1. Create or update campaign
         let campaign;
         if (data.id) {
             campaign = await prisma.campaign.update({
@@ -62,8 +46,6 @@ export async function launchCampaign(data: {
                     scheduledFor: data.scheduledFor ? new Date(data.scheduledFor) : null,
                 }
             });
-            // Clear old segments and add new one
-            await prisma.campaignSegment.deleteMany({ where: { campaignId: campaign.id } });
         } else {
             campaign = await prisma.campaign.create({
                 data: {
@@ -77,16 +59,60 @@ export async function launchCampaign(data: {
             });
         }
 
-        // 3. Link segment
-        await prisma.campaignSegment.create({
-            data: { campaignId: campaign.id, segmentId: segment.id }
-        });
-
-        // 4. Execute immediately if not scheduled
+        // 2. Send to each recipient directly
         if (!data.scheduledFor) {
-            const result = await CampaignEngine.executeCampaign(campaign.id);
+            let sentCount = 0;
+            let failCount = 0;
+
+            for (const recipient of data.recipients) {
+                try {
+                    // Personalize the email
+                    const personalizedSubject = data.subject
+                        .replace(/\{\{firstName\}\}/g, recipient.firstName || '')
+                        .replace(/\{\{lastName\}\}/g, recipient.lastName || '')
+                        .replace(/\{\{email\}\}/g, recipient.email)
+                        .replace(/\{\{company\}\}/g, recipient.company || '');
+
+                    const personalizedBody = data.body
+                        .replace(/\{\{firstName\}\}/g, recipient.firstName || '')
+                        .replace(/\{\{lastName\}\}/g, recipient.lastName || '')
+                        .replace(/\{\{email\}\}/g, recipient.email)
+                        .replace(/\{\{company\}\}/g, recipient.company || '');
+
+                    // Send the email
+                    await sendEmail({
+                        to: recipient.email,
+                        subject: personalizedSubject,
+                        html: personalizedBody,
+                    });
+
+                    // Log send event
+                    await prisma.sendEvent.create({
+                        data: {
+                            brokerId: user.brokerId,
+                            campaignId: campaign.id,
+                            type: 'SENT',
+                            metadata: { email: recipient.email, firstName: recipient.firstName, lastName: recipient.lastName },
+                        }
+                    });
+
+                    sentCount++;
+                } catch (error: any) {
+                    console.error(`[Campaign] Failed to send to ${recipient.email}:`, error.message);
+                    failCount++;
+                }
+            }
+
+            // Update campaign status
+            await prisma.campaign.update({
+                where: { id: campaign.id },
+                data: {
+                    status: 'SENT',
+                }
+            });
+
             revalidatePath('/campaigns');
-            return { success: true, campaignId: campaign.id, ...result };
+            return { success: true, campaignId: campaign.id, sentCount, failCount };
         }
 
         revalidatePath('/campaigns');
@@ -102,7 +128,7 @@ export async function saveCampaignDraft(data: {
     name: string;
     subject: string;
     body: string;
-    segmentRules?: SegmentRuleGroup;
+    recipients?: Recipient[];
 }) {
     const session = await auth();
     if (!session?.user) return { success: false, error: 'Unauthorized' };
@@ -135,21 +161,6 @@ export async function saveCampaignDraft(data: {
                     content: data.body,
                     status: 'DRAFT',
                 }
-            });
-        }
-
-        // Save segment if provided
-        if (data.segmentRules && data.segmentRules.conditions.length > 0) {
-            const segment = await prisma.segment.create({
-                data: {
-                    brokerId: user.brokerId,
-                    name: `${data.name} - Draft Segment`,
-                    rules: data.segmentRules as any,
-                }
-            });
-            await prisma.campaignSegment.deleteMany({ where: { campaignId: campaign.id } });
-            await prisma.campaignSegment.create({
-                data: { campaignId: campaign.id, segmentId: segment.id }
             });
         }
 
