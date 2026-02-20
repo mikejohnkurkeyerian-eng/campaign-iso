@@ -11,9 +11,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
 import { launchCampaign, saveCampaignDraft, getSegmentCount } from "@/lib/actions/crm";
-import { generateCampaignContent } from "@/lib/actions/ai-campaign";
 import { SegmentRuleGroup, SegmentCondition } from "@/lib/crm/segment-engine";
-import { Users, Pen, Send, ChevronRight, ChevronLeft, Sparkles, Upload, Plus, Trash2, Eye, Loader2 } from "lucide-react";
+import AIChatBot from "@/components/crm/AIChatBot";
+import { Users, Pen, Send, ChevronRight, ChevronLeft, Plus, Trash2, Eye, Loader2 } from "lucide-react";
 
 type Step = 1 | 2 | 3;
 
@@ -289,79 +289,58 @@ function AudienceStep({ name, setName, segmentRules, setSegmentRules, handleNext
 
 // ─── Step 2: Design ──────────────────────────────────
 function DesignStep({ subject, setSubject, body, setBody, handleBack, handleNext }: any) {
-    const [generating, setGenerating] = useState(false);
-    const [aiGoal, setAiGoal] = useState('');
-
-    const handleAIGenerate = async () => {
-        if (!aiGoal) return;
-        setGenerating(true);
-        try {
-            const result = await generateCampaignContent('All contacts', aiGoal, 'professional');
-            if (result.success) {
-                setSubject(result.subject || '');
-                setBody(result.body || '');
-                toast({ title: "✨ AI Content Generated!", variant: 'success' });
-            } else {
-                toast({ title: "Generation failed", variant: 'destructive' });
-            }
-        } catch { toast({ title: "AI generation error", variant: 'destructive' }); }
-        finally { setGenerating(false); }
-    };
-
     return (
         <div className="space-y-6">
             <div>
                 <h2 className="text-2xl font-heading font-bold text-white mb-1">Design Your Email</h2>
-                <p className="text-slate-400 text-sm">Write your email content or let AI generate it.</p>
+                <p className="text-slate-400 text-sm">Chat with AI to generate content, or write it yourself below.</p>
             </div>
 
-            {/* AI Generator */}
-            <div className="p-4 rounded-xl bg-gradient-to-r from-aurora-purple/10 to-aurora-blue/10 border border-aurora-purple/20">
-                <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="w-4 h-4 text-aurora-purple" />
-                    <span className="text-sm font-semibold text-white">AI Content Generator</span>
-                </div>
-                <div className="flex gap-2">
-                    <Input
-                        value={aiGoal}
-                        onChange={e => setAiGoal(e.target.value)}
-                        placeholder="e.g. Announce a spring promotion with 20% off"
-                        className="flex-1"
-                    />
-                    <Button variant="aurora" onClick={handleAIGenerate} disabled={generating || !aiGoal}>
-                        {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 mr-1" />}
-                        Generate
-                    </Button>
-                </div>
-            </div>
-
-            <div className="space-y-2">
-                <Label>Subject Line</Label>
-                <Input
-                    value={subject}
-                    onChange={e => setSubject(e.target.value)}
-                    placeholder="Enter a catchy subject line..."
+            {/* Two-column: Chat + Manual */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* AI Chatbot */}
+                <AIChatBot
+                    onApplySubject={(s) => {
+                        setSubject(s);
+                        toast({ title: "✨ Subject applied!", variant: 'success' });
+                    }}
+                    onApplyBody={(b) => {
+                        setBody(b);
+                        toast({ title: "✨ Body applied!", variant: 'success' });
+                    }}
                 />
-                <p className="text-xs text-slate-500">Use {"{{firstName}}"} for personalization</p>
-            </div>
 
-            <div className="space-y-2">
-                <Label>Email Body (HTML supported)</Label>
-                <Textarea
-                    value={body}
-                    onChange={e => setBody(e.target.value)}
-                    placeholder="Write your email content here..."
-                    className="min-h-[200px] font-mono text-sm"
-                />
-            </div>
+                {/* Manual Fields */}
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label>Subject Line</Label>
+                        <Input
+                            value={subject}
+                            onChange={e => setSubject(e.target.value)}
+                            placeholder="Enter a catchy subject line..."
+                        />
+                        <p className="text-xs text-slate-500">Use {"{{firstName}}"} for personalization</p>
+                    </div>
 
-            {/* Preview */}
-            {body && (
-                <div className="space-y-2">
-                    <Label>Preview</Label>
-                    <div className="p-4 rounded-xl bg-white text-gray-900 text-sm max-h-[300px] overflow-auto" dangerouslySetInnerHTML={{ __html: body }} />
+                    <div className="space-y-2">
+                        <Label>Email Body (HTML supported)</Label>
+                        <Textarea
+                            value={body}
+                            onChange={e => setBody(e.target.value)}
+                            placeholder="Write your email content here..."
+                            className="min-h-[200px] font-mono text-sm"
+                        />
+                    </div>
+
+                    {/* Preview */}
+                    {body && (
+                        <div className="space-y-2">
+                            <Label>Preview</Label>
+                            <div className="p-4 rounded-xl bg-white text-gray-900 text-sm max-h-[200px] overflow-auto" dangerouslySetInnerHTML={{ __html: body }} />
+                        </div>
+                    )}
                 </div>
-            )}
+            </div>
 
             <div className="flex justify-between pt-4">
                 <Button variant="outline" onClick={handleBack}>
@@ -429,8 +408,8 @@ function StepIndicator({ step, current, label, icon }: { step: number, current: 
 
     return (
         <div className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 ${isActive ? 'bg-aurora-blue/20 border border-aurora-blue/40 text-aurora-blue' :
-                isComplete ? 'bg-green-500/10 border border-green-500/20 text-green-400' :
-                    'bg-white/5 border border-white/10 text-slate-500'
+            isComplete ? 'bg-green-500/10 border border-green-500/20 text-green-400' :
+                'bg-white/5 border border-white/10 text-slate-500'
             }`}>
             {icon}
             <span className="text-xs font-medium hidden sm:inline">{label}</span>

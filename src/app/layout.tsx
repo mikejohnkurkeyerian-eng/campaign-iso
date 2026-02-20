@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import Link from 'next/link';
-import { Mail, Users, BarChart3, Zap, LogOut } from 'lucide-react';
+import { Mail, Users, BarChart3, Zap, LogOut, Sparkles } from 'lucide-react';
 
 export const metadata: Metadata = {
     title: 'Campaign Console',
@@ -14,6 +14,7 @@ function Sidebar() {
         { href: '/campaigns', label: 'Campaigns', icon: Mail },
         { href: '/campaigns/new', label: 'New Campaign', icon: Zap },
         { href: '/segments', label: 'Segments', icon: Users },
+        { href: '/ai', label: 'AI Assistant', icon: Sparkles },
     ];
 
     return (
