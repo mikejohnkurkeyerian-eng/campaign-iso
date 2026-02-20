@@ -1,0 +1,180 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Auth ────────────────────────────────────────────
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  firstName     String    @default("")
+  lastName      String    @default("")
+  phone         String?
+  password      String?
+  role          String    @default("user") // user, admin
+  brokerId      String?
+  broker        Broker?   @relation(fields: [brokerId], references: [id])
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  emailVerified DateTime?
+
+  accounts      Account[]
+  assignedLeads Lead[]    @relation("LeadAssignment")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Organization ────────────────────────────────────
+model Broker {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+
+  segments   Segment[]
+  campaigns  Campaign[]
+  sendEvents SendEvent[]
+}
+
+// ─── CRM: Leads / Contacts ──────────────────────────
+enum LeadStatus {
+  NEW
+  CONTACTED
+  ENGAGED
+  APPLICATION_STARTED
+  CLOSED_WON
+  CLOSED_LOST
+  ARCHIVED
+}
+
+model Lead {
+  id           String     @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  source       String?    // Web, Import, Manual
+  status       LeadStatus @default(NEW)
+  tags         String[]   @default([])
+
+  assignedToId String?
+  assignedTo   User?      @relation("LeadAssignment", fields: [assignedToId], references: [id])
+
+  state        String?
+  loanAmount   Float?
+  loanType     String?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  lastContactedAt DateTime?
+
+  sendEvents SendEvent[]
+}
+
+// ─── Campaign System ─────────────────────────────────
+model Segment {
+  id       String @id @default(uuid())
+  brokerId String
+  broker   Broker @relation(fields: [brokerId], references: [id])
+  name     String
+  rules    Json   // SegmentRuleGroup JSON
+
+  campaigns CampaignSegment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brokerId])
+}
+
+model Campaign {
+  id       String @id @default(uuid())
+  brokerId String
+  broker   Broker @relation(fields: [brokerId], references: [id])
+  name     String
+  status   String @default("DRAFT") // DRAFT, SCHEDULED, SENDING, COMPLETED
+
+  subject    String?
+  content    String? // HTML content
+  designData Json?   // For visual builder
+
+  fromEmail String?
+  replyTo   String?
+
+  scheduledFor  DateTime?
+  throttlePerHr Int       @default(500)
+
+  segments CampaignSegment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sendEvents SendEvent[]
+
+  @@index([brokerId])
+  @@index([brokerId, status])
+}
+
+model CampaignSegment {
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  segmentId  String
+  segment    Segment  @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, segmentId])
+}
+
+model SendEvent {
+  id       String @id @default(uuid())
+  brokerId String
+  broker   Broker @relation(fields: [brokerId], references: [id])
+  type     String // SENT, OPENED, CLICKED, BOUNCED, FAILED
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+  leadId     String?
+  lead       Lead?     @relation(fields: [leadId], references: [id])
+
+  messageId String?
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([brokerId])
+  @@index([brokerId, campaignId, type])
+  @@index([messageId])
+}
